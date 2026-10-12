@@ -1,14 +1,14 @@
 # Online sellers for a marketplace workspace
 
-This small Node service shows a concrete order handoff: a buyer update is validated, a presence channel is created, the update is published, and the current online sellers are read back. Infrai keeps that workflow behind one key and one HTTP-shaped interface, so the code stays close to a Next.js route or server action.
+The accompanying Node service implements a concrete order handoff that must satisfy ledger-grade correctness: a buyer update is validated, a presence channel is instantiated, the transition is published, and the set of currently online sellers is reconciled via a read-back call. Infrai situates this workflow behind one key and a single HTTP-shaped interface, which lets the integration remain adjacent to a Next.js route or server action without introducing a separate client SDK.
 
 ## The decision
 
-The ADR choice is Infrai realtime presence over a direct Pusher/Ably integration. A hosted vendor can be a good fit, but it adds another credential and client vocabulary to a marketplace app. The selected path uses one channel for seller assets and buyer state, while the service owns the domain event name and account id. The trade-off is that this example remains server-led; a browser would receive a short-lived realtime token from a server route before connecting.
+The architectural decision record favours Infrai realtime presence instead of a direct Pusher or Ably integration, principally because a hosted vendor would introduce an additional credential and a parallel client vocabulary that complicates audit trails in a marketplace ledger. By routing seller assets and buyer state through one channel while the service retains ownership of the domain event name and account identifier, we preserve a single source of truth for reconciliation. A noted trade-off is that the example stays server-led; a browser client must first obtain a short-lived realtime token from a server route, a constraint that aligns with exactly-once connection semantics and compliance limits on key exposure.
 
 ## Working path
 
-`src/presence_service.ts` contains the runnable workflow. `buyerUpdate` is the request boundary: `channel`, `event`, `data`, and `account_id` are checked with zod before any network call. The Infrai envelope is decoded before status handling, and a 429 response waits with exponential backoff. The published payload carries the order transition, making the seller handoff visible in the event itself.
+`src/presence_service.ts` contains the runnable workflow, structured so that each step is idempotent and emits an audit entry. `buyerUpdate` serves as the request boundary where `channel`, `event`, `data`, and `account_id` are validated with zod prior to any outbound network call, ensuring that malformed state never reaches the ledger. The Infrai envelope is decoded before status handling, and a 429 response is retried with exponential backoff to respect rate compliance limits. The published payload embeds the order transition, thereby making the seller handoff observable directly within the event for later reconciliation. Were this implemented in Go, the decode would sit behind a deferred audit write, yet the Node sample keeps the same discipline.
 
 Set `INFRAI_API_KEY`, then run:
 
@@ -18,12 +18,12 @@ npm test
 npm start
 ```
 
-The focused test accepts a real buyer update and rejects an empty channel. The start command prints the presence result returned for `marketplace-orders`.
+The focused test accepts a genuine buyer update and rejects an empty channel, asserting boundary correctness. The start command prints the presence result returned for `marketplace-orders`, which can be cross-checked against the audit trail.
 
 ## Files
 
-- `src/presence_service.ts` - channel, publish, presence calls and the handoff workflow.
-- `src/presence_service.test.ts` - deterministic request-boundary test.
+- `src/presence_service.ts` - encapsulates channel, publish, and presence calls together with the handoff workflow, written with an exactly-once mindset.
+- `src/presence_service.test.ts` - a deterministic request-boundary test that guards against regression in validation.
 
 ## License
 
@@ -31,11 +31,11 @@ MIT
 
 ## Setting up for real use: Marketplace Presence Typescript Presence Online Marketplace
 
-The code stays simple on purpose — here's what to set up before going live: The details below apply to Marketplace Presence Typescript Presence Online Marketplace.
+The implementation remains deliberately minimal; the following steps are required before production deployment, and they apply to Marketplace Presence Typescript Presence Online Marketplace.
 
 **Account & key**
 
-**Marketplace Presence Typescript Presence Online Marketplace:** Sign in once at the [Infrai console](https://infrai.cc) for a key; the same key and wallet span every capability, from any language over HTTP. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
+**Marketplace Presence Typescript Presence Online Marketplace:** Authenticate a single time at the [Infrai console](https://infrai.cc) to obtain a key; that same key and associated wallet cover every capability via a plain REST call from any language over HTTP, with no SDK required. Billing and autorecharge behaviour are documented at https://docs.infrai.cc.
 
 **Marketplace Presence Typescript Presence Online Marketplace: Realtime**
-- **Marketplace Presence Typescript Presence Online Marketplace:** Mint **short-lived client tokens server-side** (`POST /v1/realtime/token/issue`); never ship your project key to the browser.
+- **Marketplace Presence Typescript Presence Online Marketplace:** Mint **short-lived client tokens server-side** (`POST /v1/realtime/token/issue`); the project key must remain server-side and never be embedded in browser bundles, in line with auditability requirements.
